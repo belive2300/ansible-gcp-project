@@ -1,0 +1,54 @@
+---
+- hosts: localhost
+
+  vars:
+    cluster_name: cluster-test
+    gcp_auth: serviceaccount
+    gcp_auth_file: <service account key>
+    gcp_cluster_name: cluster-test
+    zone: asia-east1-a
+    gcp_project: <project-id>
+
+  tasks:
+
+    - name: create cluster
+      gcp_container_cluster:
+        name: "{{ cluster_name }}"
+        location: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        initial_node_count: 2
+        node_config:
+          machine_type: <cluster instance type>
+          disk_size_gb: 10
+          oauth_scopes:
+            - https://www.googleapis.com/auth/devstorage.read_only
+        auth_kind: "{{ gcp_auth }}"
+        service_account_file: "{{ gcp_auth_file }}"
+        state: present
+        scopes:
+          - https://www.googleapis.com/auth/cloud-platform 
+          - https://www.googleapis.com/auth/devstorage.read_only
+          - https://www.googleapis.com/auth/compute
+      register: cluster
+
+    - name: create node pool
+      gcp_container_node_pool:
+        name: pool1
+        initial_node_count: 3
+        cluster: "{{ cluster }}"
+        autoscaling:
+          enabled: yes
+          max_node_count: 3
+          min_node_count: 1
+        auth_kind: "{{ gcp_auth }}"
+        service_account_file: "{{ gcp_auth_file }}"
+        location: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        state: present
+      register: pool
+
+    - name: Allow users to control the cluster
+      command: gcloud container clusters get-credentials {{ cluster_name }} --zone {{ zone }} --project {{ gcp_project }}
+      when: 
+        - cluster is succeeded
+        - pool is succeeded
