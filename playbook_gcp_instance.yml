@@ -1,0 +1,124 @@
+---
+- hosts: localhost
+  gather_facts: no
+
+  vars:
+    gcp_project: <project-id>
+    gcp_cred_kind: serviceaccount
+    gcp_cred_file: <service accout key>
+    zone: "asia-east1-a"
+    region: "asia-east1"
+
+  tasks:
+
+    - name: create a disk
+      gcp_compute_disk:
+        name: disk1
+        size_gb: 10
+        source_image: 'projects/ubuntu-os-cloud/global/images/family/ubuntu-1804-lts'
+        zone: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        service_account_file: "{{ gcp_cred_file }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: present
+      register: disk
+      #- name: create a network
+      #gcp_compute_network:
+      #  name: 'network-instance'
+      #  project: "{{ gcp_project }}"
+      #  auth_kind: "{{ gcp_cred_kind }}"
+      #  service_account_file: "{{ gcp_cred_file }}"
+      #  scopes:
+      #    - https://www.googleapis.com/auth/compute
+      #  state: present
+      #register: network
+
+    - name: create a address
+      gcp_compute_address:
+        name: instance-address
+        address_type: "EXTERNAL"
+        region: "{{ region }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        service_account_file: "{{ gcp_cred_file }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: present
+      register: address
+ 
+    - name: create a instance
+      gcp_compute_instance:
+        state: present
+        name: <instance_name>
+        machine_type: <instance_type>
+        disks:
+          - auto_delete: true
+            boot: true
+            source: "{{ disk }}"
+        network_interfaces:
+          - network:
+            access_configs:
+              - name: 'External NAT'
+                nat_ip: "{{ address }}"
+                type: 'ONE_TO_ONE_NAT'
+        zone: "{{ zone }}"
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        service_account_file: "{{ gcp_cred_file }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+      register: instance
+
+    - name: create firewall policy for instances
+      gcp_compute_firewall:
+        name: firewall-test
+        network: 
+        allowed:
+        - ip_protocol: tcp
+          ports:
+          - '22'
+          - '80'
+          - '443'
+        project: "{{ gcp_project }}"
+        auth_kind: "{{ gcp_cred_kind }}"
+        service_account_file: "{{ gcp_cred_file }}"
+        scopes:
+          - https://www.googleapis.com/auth/compute
+        state: present
+
+    - debug:
+        msg: "{{ instance }}"
+    
+    - name: add instances host
+      add_host:
+        hostname: "{{ address.address }}"
+        groups: gcp_instance
+        ansible_user: user
+        ansible_become: yes
+        ansible_become_method: sudo
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ address.address }}"
+        port: 22
+        delay: 10
+        timeout: 60
+
+- hosts: gcp_instance
+  gather_facts: no
+
+  tasks:
+
+    - name: update
+      apt:
+        update_cache: yes
+
+    - name: download packages
+      apt:
+        pkg:
+        - git
+        - curl
+        - nginx
+        state: present
